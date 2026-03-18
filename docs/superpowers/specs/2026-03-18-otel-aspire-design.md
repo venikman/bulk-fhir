@@ -46,9 +46,12 @@ Environment variables (OTEL standard + one custom):
 |----------|---------|-----------|--------|
 | `OTEL_SERVICE_NAME` | Service identity | `bulk-fhir` | `bulk-fhir` |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | Aspire Dashboard OTLP | `http://localhost:18889` | `http://bulk-fhir-dashboard.internal:18889` |
+| `OTEL_EXPORTER_OTLP_PROTOCOL` | Wire protocol | `grpc` | `grpc` |
 | `PHOENIX_OTLP_ENDPOINT` | Phoenix OTLP (optional) | not set | `http://fhir-copilot-phoenix.internal:4317` |
 
 When `PHOENIX_OTLP_ENDPOINT` is unset, only the primary (Aspire) exporter is registered.
+
+**Protocol note:** The Aspire Dashboard accepts gRPC on port 18889 and HTTP/protobuf on 18890. We use gRPC (port 18889). Setting `OTEL_EXPORTER_OTLP_PROTOCOL=grpc` explicitly prevents ambiguity across OTEL SDK versions.
 
 ## NuGet Packages
 
@@ -61,7 +64,7 @@ Added to `src/BulkFhir.Api/BulkFhir.Api.fsproj`:
 | `OpenTelemetry.Instrumentation.Http` | HTTP client metrics + traces |
 | `OpenTelemetry.Instrumentation.Runtime` | GC, thread pool metrics |
 | `OpenTelemetry.Exporter.OpenTelemetryProtocol` | OTLP exporter |
-| `Npgsql.OpenTelemetry` | Npgsql traces + metrics |
+| `Npgsql.OpenTelemetry` | Npgsql traces (metrics require manual `AddMeter("Npgsql")`) |
 
 ## File Changes
 
@@ -71,11 +74,11 @@ Add the 6 NuGet packages listed above.
 ### `src/BulkFhir.Api/Program.fs`
 Add OTEL configuration between `CreateBuilder` and `Build`:
 
-1. Configure OpenTelemetry metrics: add ASP.NET Core, HTTP client, runtime, and Npgsql meters.
-2. Configure OpenTelemetry tracing: add ASP.NET Core, HTTP client, and Npgsql activity sources.
-3. Configure OpenTelemetry logging: add OTLP log exporter.
-4. For each signal, add OTLP exporter targeting `OTEL_EXPORTER_OTLP_ENDPOINT`.
-5. If `PHOENIX_OTLP_ENDPOINT` is set, add a second OTLP exporter for each signal.
+1. Configure OpenTelemetry metrics via `WithMetrics`: add ASP.NET Core, HTTP client, runtime meters, and `AddMeter("Npgsql")` (Npgsql emits metrics natively via `System.Diagnostics.Metrics`; the `Npgsql.OpenTelemetry` package does not auto-register the meter).
+2. Configure OpenTelemetry tracing via `WithTracing`: add ASP.NET Core, HTTP client, and Npgsql activity sources.
+3. Configure OpenTelemetry logging via `WithLogging`: add OTLP log exporter.
+4. For each signal, use the signal-specific `AddOtlpExporter("aspire", fun opts -> ...)` overload, reading `OTEL_EXPORTER_OTLP_ENDPOINT` via `Environment.GetEnvironmentVariable`. Do NOT use the cross-cutting `UseOtlpExporter()` — it can only be called once and does not support dual export.
+5. If `PHOENIX_OTLP_ENDPOINT` is set, add a second `AddOtlpExporter("phoenix", fun opts -> ...)` on each signal builder, reading the Phoenix endpoint from the env var.
 
 No changes to any handler, storage, or domain code.
 
@@ -85,7 +88,7 @@ Aspire Dashboard for local development:
 ```yaml
 services:
   dashboard:
-    image: mcr.microsoft.com/dotnet/aspire-dashboard:9.0
+    image: mcr.microsoft.com/dotnet/aspire-dashboard:9.4
     ports:
       - "18888:18888"   # Web UI
       - "18889:18889"   # OTLP gRPC receiver
@@ -97,10 +100,10 @@ services:
 Fly.io deployment for the Aspire Dashboard:
 
 - App name: `bulk-fhir-dashboard`
-- Image: `mcr.microsoft.com/dotnet/aspire-dashboard:9.0`
+- Image: `mcr.microsoft.com/dotnet/aspire-dashboard:9.4`
 - Region: `iad`
-- Web UI: exposed on HTTPS (internal port 18888)
-- OTLP: internal-only on port 18889 (no public exposure)
+- Web UI: exposed on HTTPS via `[http_service]` (internal port 18888)
+- OTLP: port 18889 must NOT appear in any `[[services]]` or `[http_service]` block — it is reachable over Fly's 6PN private network automatically because the container binds to `0.0.0.0:18889`
 - Environment: `DOTNET_DASHBOARD_UNSECURED_ALLOW_ANONYMOUS=true`
 - VM: shared-cpu-1x, 512MB (dashboard is lightweight)
 
