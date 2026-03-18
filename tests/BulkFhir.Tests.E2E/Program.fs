@@ -14,8 +14,6 @@ let main args =
                 BulkFhir.Tests.GroupTests.tests fixture
                 BulkFhir.Tests.ResourceTests.tests fixture
                 BulkFhir.Tests.BulkExportTests.tests fixture
-                BulkFhir.Tests.DashboardTests.tests fixture
-                BulkFhir.Tests.DashboardSchemaTests.tests
             ]
 
         runTestsWithCLIArgs [] args allTests

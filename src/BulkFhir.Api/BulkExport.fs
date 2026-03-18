@@ -31,39 +31,82 @@ module BulkExport =
         Directory.CreateDirectory(dir) |> ignore
         dir
 
-    let createJob (groupId: string) (requestUrl: string) (types: FhirResourceType list) =
-        let jobId = Guid.NewGuid().ToString("N").[..7]
-        let jobDir = Path.Combine(exportDir, jobId)
-        Directory.CreateDirectory(jobDir) |> ignore
-        let job =
-            { Id = jobId; GroupId = groupId; RequestUrl = requestUrl
-              Types = types; Status = Pending; CreatedAt = DateTime.UtcNow
-              CompletedAt = None; ExpiresAt = None; OutputDir = jobDir }
-        jobs.[jobId] <- job
-        job
+    let private statusToText status =
+        match status with
+        | Pending -> "pending"
+        | InProgress _ -> "in_progress"
+        | Completed -> "completed"
+        | Failed _ -> "failed"
+        | Expired -> "expired"
+
+    let private progressText status =
+        match status with
+        | InProgress progress -> Some progress
+        | Failed error -> Some error
+        | _ -> None
+
+    let private typesToText (types: FhirResourceType list) =
+        types |> List.map FhirResourceType.toString |> String.concat ","
+
+    let private persistJob (connString: string) (job: ExportJob) =
+        Repository.upsertBulkExportJob
+            connString
+            job.Id
+            job.GroupId
+            (statusToText job.Status)
+            job.RequestUrl
+            (typesToText job.Types)
+            job.CreatedAt
+            job.CompletedAt
+            job.ExpiresAt
+            (progressText job.Status)
+
+    let createJob (connString: string) (groupId: string) (requestUrl: string) (types: FhirResourceType list) =
+        task {
+            let jobId = Guid.NewGuid().ToString("N").[..7]
+            let jobDir = Path.Combine(exportDir, jobId)
+            Directory.CreateDirectory(jobDir) |> ignore
+            let job =
+                { Id = jobId; GroupId = groupId; RequestUrl = requestUrl
+                  Types = types; Status = Pending; CreatedAt = DateTime.UtcNow
+                  CompletedAt = None; ExpiresAt = None; OutputDir = jobDir }
+            jobs.[jobId] <- job
+            do! persistJob connString job
+            return job
+        }
 
     let getJob (jobId: string) =
         match jobs.TryGetValue(jobId) with
         | true, job -> Some job
         | _ -> None
 
-    let updateJob (job: ExportJob) =
-        jobs.[job.Id] <- job
+    let updateJob (connString: string) (job: ExportJob) =
+        task {
+            jobs.[job.Id] <- job
+            do! persistJob connString job
+        }
 
-    let expireJob (jobId: string) =
-        match jobs.TryGetValue(jobId) with
-        | true, job ->
-            jobs.[job.Id] <- { job with Status = Expired; ExpiresAt = Some DateTime.UtcNow }
-            try if Directory.Exists(job.OutputDir) then Directory.Delete(job.OutputDir, true)
-            with _ -> ()
-            true
-        | _ -> false
+    let expireJob (connString: string) (jobId: string) =
+        task {
+            match jobs.TryGetValue(jobId) with
+            | true, job ->
+                let expiredJob = { job with Status = Expired; ExpiresAt = Some DateTime.UtcNow }
+                jobs.[job.Id] <- expiredJob
+                do! persistJob connString expiredJob
+                try
+                    if Directory.Exists(job.OutputDir) then
+                        Directory.Delete(job.OutputDir, true)
+                with _ ->
+                    ()
+                return true
+            | _ -> return false
+        }
 
     /// Run the bulk export: query resources for each type linked to the group, write NDJSON files.
     let runExport (connString: string) (job: ExportJob) (groupJson: string) =
         task {
             try
-                updateJob { job with Status = InProgress "Resolving group members..." }
+                do! updateJob connString { job with Status = InProgress "Resolving group members..." }
 
                 let doc = JsonDocument.Parse(groupJson)
                 let root = doc.RootElement
@@ -93,7 +136,7 @@ module BulkExport =
                 // Build the "Patient/{id}" form for subject_ref lookups
                 let patientSubjectRefs = patientIds |> List.map (fun id -> $"Patient/{id}")
 
-                updateJob { job with Status = InProgress $"Found {patientRefs.Length} members, exporting..." }
+                do! updateJob connString { job with Status = InProgress $"Found {patientRefs.Length} members, exporting..." }
 
                 // Write Group NDJSON
                 if job.Types |> List.contains FhirResourceType.Group then
@@ -104,7 +147,7 @@ module BulkExport =
                 for rt in job.Types do
                     if rt <> FhirResourceType.Group then
                         let typeName = FhirResourceType.toString rt
-                        updateJob { job with Status = InProgress $"Exporting {typeName}..." }
+                        do! updateJob connString { job with Status = InProgress $"Exporting {typeName}..." }
 
                         match rt with
                         | FhirResourceType.Organization | FhirResourceType.Practitioner ->
@@ -124,9 +167,9 @@ module BulkExport =
                                 File.WriteAllText(path, content + "\n")
 
                 let now = DateTime.UtcNow
-                updateJob { job with Status = Completed; CompletedAt = Some now; ExpiresAt = Some (now.AddHours(1.0)) }
+                do! updateJob connString { job with Status = Completed; CompletedAt = Some now; ExpiresAt = Some (now.AddHours(1.0)) }
             with ex ->
-                updateJob { job with Status = Failed ex.Message }
+                do! updateJob connString { job with Status = Failed ex.Message }
         }
 
     /// Build the export manifest response for a completed job.

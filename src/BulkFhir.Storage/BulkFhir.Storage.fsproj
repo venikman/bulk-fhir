@@ -6,10 +6,11 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <Compile Include="Connection.fs" />
     <Compile Include="Schema.fs" />
     <Compile Include="Search.fs" />
     <Compile Include="Repository.fs" />
-  </ItemGroup>
+</ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\BulkFhir.Domain\BulkFhir.Domain.fsproj" />

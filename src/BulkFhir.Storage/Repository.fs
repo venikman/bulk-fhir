@@ -17,7 +17,7 @@ module Repository =
             else
                 let table = FhirResourceType.tableName resourceType
                 let sql = $"SELECT resource_text FROM {table} WHERE id = ANY(@Ids)"
-                use conn = new NpgsqlConnection(connString)
+                use conn = Connection.createConnection connString
                 let! results = conn.QueryAsync<string>(sql, {| Ids = ids |> Array.ofList |})
                 return results |> Seq.toList
         }
@@ -27,7 +27,7 @@ module Repository =
         task {
             let table = FhirResourceType.tableName resourceType
             let sql = $"SELECT resource_text FROM {table} WHERE id = @Id LIMIT 1"
-            use conn = new NpgsqlConnection(connString)
+            use conn = Connection.createConnection connString
             let! result = conn.QuerySingleOrDefaultAsync<string>(sql, {| Id = id |})
             return if isNull result then None else Some result
         }
@@ -38,7 +38,7 @@ module Repository =
             let table = FhirResourceType.tableName resourceType
             let whereClause, parameters = Search.buildWhere searchParams
 
-            use conn = new NpgsqlConnection(connString)
+            use conn = Connection.createConnection connString
             let dynParams = DynamicParameters()
             for (name, value) in parameters do
                 dynParams.Add(name, value)
@@ -56,7 +56,7 @@ module Repository =
         task {
             let table = FhirResourceType.tableName resourceType
             let sql = $"SELECT resource_text FROM {table}"
-            use conn = new NpgsqlConnection(connString)
+            use conn = Connection.createConnection connString
             do! conn.OpenAsync()
             use cmd = new NpgsqlCommand(sql, conn)
             use! reader = cmd.ExecuteReaderAsync()
@@ -73,7 +73,7 @@ module Repository =
         task {
             let table = FhirResourceType.tableName resourceType
             let sql = $"SELECT resource_text FROM {table}"
-            use conn = new NpgsqlConnection(connString)
+            use conn = Connection.createConnection connString
             let! results = conn.QueryAsync<string>(sql)
             return results |> Seq.toList
         }
@@ -82,7 +82,7 @@ module Repository =
     let searchGroupsByIdentifier (connString: string) (system: string) (value: string) =
         task {
             let sql = "SELECT resource_text FROM groups WHERE identifier_system = @System AND identifier_value = @Value"
-            use conn = new NpgsqlConnection(connString)
+            use conn = Connection.createConnection connString
             let! results = conn.QueryAsync<string>(sql, {| System = system; Value = value |})
             return results |> Seq.toList
         }
@@ -91,9 +91,61 @@ module Repository =
     let searchGroupsByName (connString: string) (name: string) =
         task {
             let sql = "SELECT resource_text FROM groups WHERE lower(name) LIKE @Name"
-            use conn = new NpgsqlConnection(connString)
+            use conn = Connection.createConnection connString
             let! results = conn.QueryAsync<string>(sql, {| Name = $"%%{name.ToLowerInvariant()}%%" |})
             return results |> Seq.toList
+        }
+
+    /// Persist the dashboard-visible state for a bulk export job.
+    let upsertBulkExportJob
+        (connString: string)
+        (jobId: string)
+        (groupId: string)
+        (status: string)
+        (requestUrl: string)
+        (types: string)
+        (createdAt: DateTime)
+        (completedAt: DateTime option)
+        (expiresAt: DateTime option)
+        (progress: string option) =
+        task {
+            let sql =
+                """
+                INSERT INTO bulk_export_jobs (
+                    id, group_id, status, request_url, types, created_at, completed_at, expires_at, progress
+                )
+                VALUES (
+                    @Id, @GroupId, @Status, @RequestUrl, @Types, @CreatedAt, @CompletedAt, @ExpiresAt, @Progress
+                )
+                ON CONFLICT (id) DO UPDATE SET
+                    group_id = EXCLUDED.group_id,
+                    status = EXCLUDED.status,
+                    request_url = EXCLUDED.request_url,
+                    types = EXCLUDED.types,
+                    created_at = EXCLUDED.created_at,
+                    completed_at = EXCLUDED.completed_at,
+                    expires_at = EXCLUDED.expires_at,
+                    progress = EXCLUDED.progress
+                """
+
+            use conn = Connection.createConnection connString
+            let completedAtValue = completedAt |> Option.toNullable
+            let expiresAtValue = expiresAt |> Option.toNullable
+            let progressValue = progress |> Option.toObj
+            let! _ =
+                conn.ExecuteAsync(
+                    sql,
+                    {| Id = jobId
+                       GroupId = groupId
+                       Status = status
+                       RequestUrl = requestUrl
+                       Types = types
+                       CreatedAt = createdAt
+                       CompletedAt = completedAtValue
+                       ExpiresAt = expiresAtValue
+                       Progress = progressValue |})
+
+            return ()
         }
 
     /// Get all resource_text for a given type and list of subject/patient references.
@@ -127,7 +179,7 @@ module Repository =
                         failwith $"getBySubjectRefs not applicable to {FhirResourceType.toString resourceType}"
 
                 let sql = $"SELECT resource_text FROM {table} WHERE {refCol} = ANY(@Refs)"
-                use conn = new NpgsqlConnection(connString)
+                use conn = Connection.createConnection connString
                 let! results = conn.QueryAsync<string>(sql, {| Refs = refs |> Array.ofList |})
                 return results |> Seq.toList
         }

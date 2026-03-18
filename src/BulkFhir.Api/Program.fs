@@ -1,8 +1,11 @@
 open Microsoft.AspNetCore.Builder
 open Microsoft.Extensions.DependencyInjection
+open Microsoft.Extensions.Configuration
+open System
 open Falco
 open Falco.Routing
 open BulkFhir.Api
+open BulkFhir.Storage
 
 let endpoints =
     [
@@ -28,6 +31,9 @@ let endpoints =
 let main args =
     let builder = WebApplication.CreateBuilder(args)
     builder.Services.AddRouting() |> ignore
+    let connString = builder.Configuration.GetConnectionString("DefaultConnection")
+    if not (String.IsNullOrWhiteSpace connString) then
+        Schema.createSchema connString |> fun task -> task.GetAwaiter().GetResult()
     let app = builder.Build()
     app.UseRouting() |> ignore
     app.UseFalco(endpoints) |> ignore

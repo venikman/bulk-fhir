@@ -37,7 +37,7 @@ module Handlers =
             task {
                 try
                     let connString = getConnString ctx
-                    use conn = new Npgsql.NpgsqlConnection(connString)
+                    use conn = Connection.createConnection connString
                     do! conn.OpenAsync()
                     ctx.Response.ContentType <- "application/json"
                     return! ctx.Response.WriteAsJsonAsync({| status = "ok" |})
@@ -163,7 +163,7 @@ module Handlers =
                     |> List.choose FhirResourceType.fromString
 
                 let requestUrl = $"{baseUrl}{ctx.Request.Path}{ctx.Request.QueryString}"
-                let job = BulkExport.createJob groupId requestUrl fhirTypes
+                let! job = BulkExport.createJob connString groupId requestUrl fhirTypes
 
                 logger.LogInformation("Bulk export started job={JobId} group={GroupId} types={Types}", job.Id, groupId, String.Join(",", requestedTypes))
                 let _ = Task.Run(fun () -> BulkExport.runExport connString job groupJson :> Task)
@@ -210,8 +210,10 @@ module Handlers =
     let bulkStatusDelete : HttpHandler =
         fun ctx ->
             task {
+                let connString = getConnString ctx
                 let jobId = ctx.Request.RouteValues.["jobId"] :?> string
-                if BulkExport.expireJob jobId then
+                let! expired = BulkExport.expireJob connString jobId
+                if expired then
                     ctx.Response.StatusCode <- 202
                     return ()
                 else

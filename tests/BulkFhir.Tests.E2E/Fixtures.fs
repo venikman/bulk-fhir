@@ -11,11 +11,14 @@ open Microsoft.Extensions.DependencyInjection
 open Falco
 open Falco.Routing
 open BulkFhir.Api
+open BulkFhir.Storage
 
 let readBody (resp: HttpResponseMessage) = resp.Content.ReadAsStringAsync()
 let parseJson (s: string) = JsonDocument.Parse(s)
 
 let private createTestServer (connString: string) =
+    Schema.createSchema connString |> fun task -> task.GetAwaiter().GetResult()
+
     let endpoints =
         [
             get "/health" Handlers.health
@@ -34,7 +37,9 @@ let private createTestServer (connString: string) =
         WebHostBuilder()
             .ConfigureAppConfiguration(fun _ cfg ->
                 cfg.AddInMemoryCollection(
-                    dict ["ConnectionStrings:DefaultConnection", connString]) |> ignore)
+                    dict [
+                        "ConnectionStrings:DefaultConnection", connString
+                    ]) |> ignore)
             .ConfigureServices(fun services ->
                 services.AddRouting() |> ignore)
             .Configure(fun app ->
