@@ -17,20 +17,27 @@ module Fhir =
                issue = [| {| severity = severity; code = code; diagnostics = diagnostics |} |] |})
 
     /// Build a FHIR searchset Bundle using Utf8JsonWriter to correctly embed raw JSON resources.
-    let searchBundle (baseUrl: string) (resourceType: string) (selfUrl: string) (resources: string list) =
+    let searchBundle (baseUrl: string) (resourceType: string) (selfUrl: string) (total: int) (nextUrl: string option) (resources: string list) =
         use stream = new MemoryStream()
         use writer = new Utf8JsonWriter(stream)
 
         writer.WriteStartObject()
         writer.WriteString("resourceType", "Bundle")
         writer.WriteString("type", "searchset")
-        writer.WriteNumber("total", resources.Length)
+        writer.WriteNumber("total", total)
 
         writer.WriteStartArray("link")
         writer.WriteStartObject()
         writer.WriteString("relation", "self")
         writer.WriteString("url", selfUrl)
         writer.WriteEndObject()
+        match nextUrl with
+        | Some url ->
+            writer.WriteStartObject()
+            writer.WriteString("relation", "next")
+            writer.WriteString("url", url)
+            writer.WriteEndObject()
+        | None -> ()
         writer.WriteEndArray()
 
         writer.WriteStartArray("entry")

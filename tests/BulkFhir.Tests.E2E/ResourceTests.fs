@@ -1,5 +1,6 @@
 module BulkFhir.Tests.ResourceTests
 
+open System
 open System.Net
 open System.Net.Http
 open Expecto
@@ -106,6 +107,55 @@ let tests (fixture: TestFixture) =
             let doc = parseJson body
             test <@ doc.RootElement.GetProperty("total").GetInt32() >= 1 @>
         }
+
+        // ─── Pagination ──────────────────────────────
+
+        testTask "GET /fhir/Patient?_count=2 returns at most 2 entries" {
+            let! (resp: HttpResponseMessage) = fixture.Client.GetAsync("/fhir/Patient?_count=2")
+            test <@ resp.StatusCode = HttpStatusCode.OK @>
+            let! body = readBody resp
+            let doc = parseJson body
+            let total = doc.RootElement.GetProperty("total").GetInt32()
+            test <@ total >= 3 @> // need enough data for pagination to matter
+            let entryCount = doc.RootElement.GetProperty("entry").GetArrayLength()
+            test <@ entryCount <= 2 @>
+        }
+
+        testTask "GET /fhir/Patient?_count=2 includes next link when more results" {
+            let! (resp: HttpResponseMessage) = fixture.Client.GetAsync("/fhir/Patient?_count=2")
+            test <@ resp.StatusCode = HttpStatusCode.OK @>
+            let! body = readBody resp
+            let doc = parseJson body
+            let links = doc.RootElement.GetProperty("link")
+            let relations =
+                [ for i in 0 .. links.GetArrayLength() - 1 ->
+                    links.[i].GetProperty("relation").GetString() ]
+            test <@ relations |> List.contains "next" @>
+        }
+
+        testTask "following next link returns next page of results" {
+            let! (resp: HttpResponseMessage) = fixture.Client.GetAsync("/fhir/Patient?_count=2")
+            let! body = readBody resp
+            let doc = parseJson body
+            let links = doc.RootElement.GetProperty("link")
+            let nextUrl =
+                [ for i in 0 .. links.GetArrayLength() - 1 -> links.[i] ]
+                |> List.find (fun l -> l.GetProperty("relation").GetString() = "next")
+                |> fun l -> l.GetProperty("url").GetString()
+            let nextPath = Uri(nextUrl).PathAndQuery
+            let! (resp2: HttpResponseMessage) = fixture.Client.GetAsync(nextPath)
+            test <@ resp2.StatusCode = HttpStatusCode.OK @>
+            let! body2 = readBody resp2
+            let doc2 = parseJson body2
+            let entryCount2 = doc2.RootElement.GetProperty("entry").GetArrayLength()
+            test <@ entryCount2 >= 1 @>
+            // page 2 first ID should differ from page 1 first ID
+            let id1 = doc.RootElement.GetProperty("entry").[0].GetProperty("resource").GetProperty("id").GetString()
+            let id2 = doc2.RootElement.GetProperty("entry").[0].GetProperty("resource").GetProperty("id").GetString()
+            test <@ id1 <> id2 @>
+        }
+
+        // ─── Other ──────────────────────────────────
 
         testTask "GET /fhir/UnknownType returns 404" {
             let! (resp: HttpResponseMessage) = fixture.Client.GetAsync("/fhir/FakeResource")

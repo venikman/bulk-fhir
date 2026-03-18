@@ -106,19 +106,22 @@ module BulkExport =
                         let typeName = FhirResourceType.toString rt
                         updateJob { job with Status = InProgress $"Exporting {typeName}..." }
 
-                        let! resources =
-                            match rt with
-                            | FhirResourceType.Patient ->
-                                Repository.readByIds connString FhirResourceType.Patient patientIds
-                            | FhirResourceType.Organization | FhirResourceType.Practitioner ->
-                                Repository.listAll connString rt
-                            | _ ->
-                                Repository.getBySubjectRefs connString rt patientSubjectRefs
-
-                        if not resources.IsEmpty then
+                        match rt with
+                        | FhirResourceType.Organization | FhirResourceType.Practitioner ->
                             let path = Path.Combine(job.OutputDir, $"{typeName}-1.ndjson")
-                            let content = resources |> String.concat "\n"
-                            File.WriteAllText(path, content + "\n")
+                            let! count = Repository.streamAllToFile connString rt path
+                            if count = 0 then File.Delete(path)
+                        | _ ->
+                            let! resources =
+                                match rt with
+                                | FhirResourceType.Patient ->
+                                    Repository.readByIds connString FhirResourceType.Patient patientIds
+                                | _ ->
+                                    Repository.getBySubjectRefs connString rt patientSubjectRefs
+                            if not resources.IsEmpty then
+                                let path = Path.Combine(job.OutputDir, $"{typeName}-1.ndjson")
+                                let content = resources |> String.concat "\n"
+                                File.WriteAllText(path, content + "\n")
 
                 let now = DateTime.UtcNow
                 updateJob { job with Status = Completed; CompletedAt = Some now; ExpiresAt = Some (now.AddHours(1.0)) }

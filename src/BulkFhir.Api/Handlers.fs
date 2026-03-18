@@ -5,6 +5,7 @@ open System.IO
 open System.Threading.Tasks
 open Microsoft.AspNetCore.Http
 open Microsoft.Extensions.Configuration
+open Microsoft.Extensions.Logging
 open Falco
 open BulkFhir.Domain
 open BulkFhir.Storage
@@ -18,6 +19,10 @@ module Handlers =
 
     let private getBaseUrl (ctx: HttpContext) =
         $"{ctx.Request.Scheme}://{ctx.Request.Host}"
+
+    let private getLogger (ctx: HttpContext) =
+        ctx.RequestServices.GetService(typeof<ILoggerFactory>) :?> ILoggerFactory
+        |> fun f -> f.CreateLogger("BulkFhir.Api")
 
     let private fhirJson (statusCode: int) (body: string) : HttpHandler =
         fun ctx ->
@@ -37,6 +42,8 @@ module Handlers =
                     ctx.Response.ContentType <- "application/json"
                     return! ctx.Response.WriteAsJsonAsync({| status = "ok" |})
                 with ex ->
+                    let logger = getLogger ctx
+                    logger.LogError(ex, "Health check failed")
                     ctx.Response.StatusCode <- 503
                     return! ctx.Response.WriteAsJsonAsync({| status = "error"; detail = ex.Message |})
             } :> Task
@@ -84,12 +91,12 @@ module Handlers =
                         let value = raw.[i+1..]
                         let! results = Repository.searchGroupsByIdentifier connString system value
                         let selfUrl = $"{baseUrl}/fhir/Group?identifier={Uri.EscapeDataString raw}"
-                        return! fhirJson 200 (Fhir.searchBundle baseUrl "Group" selfUrl results) ctx
+                        return! fhirJson 200 (Fhir.searchBundle baseUrl "Group" selfUrl results.Length None results) ctx
                 else
                     let name = string query.["name"]
                     let! results = Repository.searchGroupsByName connString name
                     let selfUrl = $"{baseUrl}/fhir/Group?name={Uri.EscapeDataString name}"
-                    return! fhirJson 200 (Fhir.searchBundle baseUrl "Group" selfUrl results) ctx
+                    return! fhirJson 200 (Fhir.searchBundle baseUrl "Group" selfUrl results.Length None results) ctx
             } :> Task
 
     let groupRead : HttpHandler =
@@ -112,6 +119,7 @@ module Handlers =
         fun ctx ->
             task {
                 let connString = getConnString ctx
+                let logger = getLogger ctx
                 let baseUrl = getBaseUrl ctx
                 let query = ctx.Request.Query
                 let groupId = ctx.Request.RouteValues.["id"] :?> string
@@ -157,7 +165,7 @@ module Handlers =
                 let requestUrl = $"{baseUrl}{ctx.Request.Path}{ctx.Request.QueryString}"
                 let job = BulkExport.createJob groupId requestUrl fhirTypes
 
-                // Fire and forget the export (pass pre-fetched group JSON to avoid re-read)
+                logger.LogInformation("Bulk export started job={JobId} group={GroupId} types={Types}", job.Id, groupId, String.Join(",", requestedTypes))
                 let _ = Task.Run(fun () -> BulkExport.runExport connString job groupJson :> Task)
 
                 ctx.Response.StatusCode <- 202
@@ -241,6 +249,7 @@ module Handlers =
             task {
                 let connString = getConnString ctx
                 let baseUrl = getBaseUrl ctx
+                let logger = getLogger ctx
                 let typeName = ctx.Request.RouteValues.["resourceType"] :?> string
 
                 match FhirResourceType.fromString typeName with
@@ -264,10 +273,31 @@ module Handlers =
                         return! fhirJson 400 (Fhir.operationOutcome "error" "invalid" msg) ctx
                     else
 
+                    let count =
+                        queryParams |> List.tryFind (fun (k, _) -> k = "_count")
+                        |> Option.bind (fun (_, v) -> match Int32.TryParse(v) with true, n -> Some n | _ -> None)
+                        |> Option.defaultValue 100
+                        |> min 1000 |> max 1
+                    let offset =
+                        queryParams |> List.tryFind (fun (k, _) -> k = "_offset")
+                        |> Option.bind (fun (_, v) -> match Int32.TryParse(v) with true, n -> Some n | _ -> None)
+                        |> Option.defaultValue 0
+                        |> max 0
+
                     let searchParams = Repository.parseSearchParams rt queryParams
-                    let! results = Repository.search connString rt searchParams
+                    let! (total, results) = Repository.search connString rt searchParams count offset
+                    logger.LogInformation("Search {ResourceType} offset={Offset} count={Count} total={Total} returned={Returned}", typeName, offset, count, total, results.Length)
                     let selfUrl = $"{baseUrl}{ctx.Request.Path}{ctx.Request.QueryString}"
-                    return! fhirJson 200 (Fhir.searchBundle baseUrl typeName selfUrl results) ctx
+                    let nextUrl =
+                        if offset + count < total then
+                            let searchQ =
+                                queryParams
+                                |> List.filter (fun (k, _) -> k <> "_offset")
+                                |> List.map (fun (k, v) -> $"{k}={Uri.EscapeDataString v}")
+                            let nextQ = String.Join("&", $"_offset={offset + count}" :: searchQ)
+                            Some $"{baseUrl}{ctx.Request.Path}?{nextQ}"
+                        else None
+                    return! fhirJson 200 (Fhir.searchBundle baseUrl typeName selfUrl total nextUrl results) ctx
             } :> Task
 
     let resourceRead : HttpHandler =

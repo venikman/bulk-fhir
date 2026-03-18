@@ -32,23 +32,43 @@ module Repository =
             return if isNull result then None else Some result
         }
 
-    /// Search resources returning raw JSON. Applies WHERE clause from search params.
-    let search (connString: string) (resourceType: FhirResourceType) (searchParams: Search.SearchParam list) =
+    /// Search resources returning raw JSON + total count. Applies WHERE clause from search params.
+    let search (connString: string) (resourceType: FhirResourceType) (searchParams: Search.SearchParam list) (count: int) (offset: int) =
         task {
             let table = FhirResourceType.tableName resourceType
             let whereClause, parameters = Search.buildWhere searchParams
-            let sql = $"SELECT resource_text FROM {table}{whereClause} LIMIT 100"
 
             use conn = new NpgsqlConnection(connString)
             let dynParams = DynamicParameters()
             for (name, value) in parameters do
                 dynParams.Add(name, value)
 
+            let countSql = $"SELECT count(*)::int FROM {table}{whereClause}"
+            let! total = conn.QuerySingleAsync<int>(countSql, dynParams)
+
+            let sql = $"SELECT resource_text FROM {table}{whereClause} ORDER BY id LIMIT {count} OFFSET {offset}"
             let! results = conn.QueryAsync<string>(sql, dynParams)
-            return results |> Seq.toList
+            return total, results |> Seq.toList
         }
 
-    /// List all resources of a type (no filter, no limit). Used by bulk export.
+    /// Stream all resources of a type to a file, returning count written.
+    let streamAllToFile (connString: string) (resourceType: FhirResourceType) (filePath: string) =
+        task {
+            let table = FhirResourceType.tableName resourceType
+            let sql = $"SELECT resource_text FROM {table}"
+            use conn = new NpgsqlConnection(connString)
+            do! conn.OpenAsync()
+            use cmd = new NpgsqlCommand(sql, conn)
+            use! reader = cmd.ExecuteReaderAsync()
+            use writer = new System.IO.StreamWriter(filePath)
+            let mutable count = 0
+            while! reader.ReadAsync() do
+                do! writer.WriteLineAsync(reader.GetString(0))
+                count <- count + 1
+            return count
+        }
+
+    /// List all resources of a type. For small result sets only (Groups, search results).
     let listAll (connString: string) (resourceType: FhirResourceType) =
         task {
             let table = FhirResourceType.tableName resourceType
@@ -115,7 +135,7 @@ module Repository =
     /// Known search parameters per resource type (including meta-params).
     /// Used by the handler to reject unsupported parameters.
     let knownSearchParams (resourceType: FhirResourceType) : Set<string> =
-        let metaParams = set ["_summary"; "_count"; "_format"]
+        let metaParams = set ["_summary"; "_count"; "_offset"; "_format"]
         let typeParams =
             match resourceType with
             | FhirResourceType.Patient              -> set ["name"; "birthdate"; "gender"; "general-practitioner"]
