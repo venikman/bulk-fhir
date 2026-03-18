@@ -1,23 +1,23 @@
-# OpenTelemetry + Aspire Dashboard Integration
+# OpenTelemetry + Phoenix Integration
 
 **Date:** 2026-03-18
 **Status:** Approved
 
 ## Goal
 
-Add OpenTelemetry observability (metrics, traces, logs) to the bulk-fhir API, exporting to both a .NET Aspire Dashboard and an existing Arize Phoenix collector on Fly.io.
+Add OpenTelemetry observability (metrics, traces, logs) to the bulk-fhir API, exporting to Arize Phoenix — locally for dev, deployed instance on Fly.io for production.
 
 ## Architecture
 
 ```
-bulk-fhir (Fly.io)
-  ├─ OTLP ──► bulk-fhir-dashboard.internal:18889  (Aspire Dashboard)
-  └─ OTLP ──► fhir-copilot-phoenix.internal:4317   (Phoenix collector)
+Local dev:
+  bulk-fhir (dotnet run)  ── OTLP gRPC ──►  Phoenix (docker-compose, localhost:4317)
+                                              UI at localhost:6006
+
+Production:
+  bulk-fhir (Fly.io)  ── OTLP gRPC ──►  fhir-copilot-phoenix.internal:4317
+                                          UI at fhir-copilot-phoenix.fly.dev
 ```
-
-All three are in the same Fly.io org and region (`iad`), communicating over private networking.
-
-For local development, only the Aspire Dashboard runs (via docker-compose), and Phoenix is skipped.
 
 ## Telemetry Signals
 
@@ -40,18 +40,15 @@ All built-in, no custom metrics in this iteration.
 
 ## Configuration
 
-Environment variables (OTEL standard + one custom):
+Standard OTEL environment variables — no custom env vars needed:
 
 | Variable | Purpose | Local dev | Fly.io |
 |----------|---------|-----------|--------|
 | `OTEL_SERVICE_NAME` | Service identity | `bulk-fhir` | `bulk-fhir` |
-| `OTEL_EXPORTER_OTLP_ENDPOINT` | Aspire Dashboard OTLP | `http://localhost:18889` | `http://bulk-fhir-dashboard.internal:18889` |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | Phoenix OTLP | `http://localhost:4317` | `http://fhir-copilot-phoenix.internal:4317` |
 | `OTEL_EXPORTER_OTLP_PROTOCOL` | Wire protocol | `grpc` | `grpc` |
-| `PHOENIX_OTLP_ENDPOINT` | Phoenix OTLP (optional) | not set | `http://fhir-copilot-phoenix.internal:4317` |
 
-When `PHOENIX_OTLP_ENDPOINT` is unset, only the primary (Aspire) exporter is registered.
-
-**Protocol note:** The Aspire Dashboard accepts gRPC on port 18889 and HTTP/protobuf on 18890. We use gRPC (port 18889). Setting `OTEL_EXPORTER_OTLP_PROTOCOL=grpc` explicitly prevents ambiguity across OTEL SDK versions.
+Single exporter, single endpoint. When `OTEL_EXPORTER_OTLP_ENDPOINT` is unset, OTEL is configured but exports nowhere (safe no-op).
 
 ## NuGet Packages
 
@@ -77,35 +74,39 @@ Add OTEL configuration between `CreateBuilder` and `Build`:
 1. Configure OpenTelemetry metrics via `WithMetrics`: add ASP.NET Core, HTTP client, runtime meters, and `AddMeter("Npgsql")` (Npgsql emits metrics natively via `System.Diagnostics.Metrics`; the `Npgsql.OpenTelemetry` package does not auto-register the meter).
 2. Configure OpenTelemetry tracing via `WithTracing`: add ASP.NET Core, HTTP client, and Npgsql activity sources.
 3. Configure OpenTelemetry logging via `WithLogging`: add OTLP log exporter.
-4. For each signal, use the signal-specific `AddOtlpExporter("aspire", fun opts -> ...)` overload, reading `OTEL_EXPORTER_OTLP_ENDPOINT` via `Environment.GetEnvironmentVariable`. Do NOT use the cross-cutting `UseOtlpExporter()` — it can only be called once and does not support dual export.
-5. If `PHOENIX_OTLP_ENDPOINT` is set, add a second `AddOtlpExporter("phoenix", fun opts -> ...)` on each signal builder, reading the Phoenix endpoint from the env var.
+4. Use `UseOtlpExporter()` — single exporter, reads `OTEL_EXPORTER_OTLP_ENDPOINT` and `OTEL_EXPORTER_OTLP_PROTOCOL` automatically from environment.
 
 No changes to any handler, storage, or domain code.
 
 ### `docker-compose.yml` (new)
-Aspire Dashboard for local development:
+Phoenix for local development:
 
 ```yaml
 services:
-  dashboard:
-    image: mcr.microsoft.com/dotnet/aspire-dashboard:13.1
+  phoenix:
+    image: arizephoenix/phoenix:latest
     ports:
-      - "18888:18888"   # Web UI
-      - "18889:18889"   # OTLP gRPC receiver
-    environment:
-      DOTNET_DASHBOARD_UNSECURED_ALLOW_ANONYMOUS: "true"
+      - "6006:6006"    # Web UI
+      - "4317:4317"    # OTLP gRPC receiver
 ```
 
-### `infra/aspire-dashboard/fly.toml` (new)
-Fly.io deployment for the Aspire Dashboard:
+### Remove dashboard API (dead code)
 
-- App name: `bulk-fhir-dashboard`
-- Image: `mcr.microsoft.com/dotnet/aspire-dashboard:13.1`
-- Region: `iad`
-- Web UI: exposed on HTTPS via `[http_service]` (internal port 18888)
-- OTLP: port 18889 must NOT appear in any `[[services]]` or `[http_service]` block — it is reachable over Fly's 6PN private network automatically because the container binds to `0.0.0.0:18889`
-- Environment: `DOTNET_DASHBOARD_UNSECURED_ALLOW_ANONYMOUS=true`
-- VM: shared-cpu-1x, 512MB (dashboard is lightweight)
+Delete these files:
+- `src/BulkFhir.Api/DashboardHandlers.fs`
+- `src/BulkFhir.Storage/Dashboard.fs`
+- `tests/BulkFhir.Tests.E2E/DashboardTests.fs`
+- `tests/BulkFhir.Tests.E2E/DashboardSchemaTests.fs`
+
+Update these files:
+- `src/BulkFhir.Api/BulkFhir.Api.fsproj` — remove `DashboardHandlers.fs` compile entry
+- `src/BulkFhir.Storage/BulkFhir.Storage.fsproj` — remove `Dashboard.fs` compile entry
+- `src/BulkFhir.Api/Program.fs` — remove 6 dashboard route lines
+- `tests/.../BulkFhir.Tests.E2E.fsproj` — remove `DashboardTests.fs` and `DashboardSchemaTests.fs` compile entries, remove `Npgsql` package ref
+- `tests/.../Program.fs` — remove `DashboardTests` and `DashboardSchemaTests` references
+- `src/BulkFhir.Storage/Schema.fs` — remove 6 dashboard SQL views, `bulk_export_jobs` table
+- `src/BulkFhir.Storage/Repository.fs` — remove `upsertBulkExportJob` function
+- `src/BulkFhir.Api/BulkExport.fs` — remove `persistJob` calls and DB persistence (jobs stay in-memory only)
 
 ## What This Does NOT Change
 
@@ -118,6 +119,5 @@ Fly.io deployment for the Aspire Dashboard:
 ## Verification
 
 1. `dotnet build BulkFhir.slnx` — solution compiles
-2. `docker compose up -d` + `dotnet run` locally — dashboard at localhost:18888 shows traces/metrics/logs
-3. `fly deploy -a bulk-fhir-dashboard` — dashboard accessible on Fly.io
-4. `fly deploy -a bulk-fhir` (with env vars set) — traces appear in both Aspire and Phoenix
+2. `docker compose up -d` + `dotnet run` locally with `OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317` — Phoenix at localhost:6006 shows traces/metrics/logs
+3. `fly deploy -a bulk-fhir` (with env vars set) — traces appear in Phoenix at fhir-copilot-phoenix.fly.dev
