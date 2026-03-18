@@ -88,7 +88,7 @@ Aspire Dashboard for local development:
 ```yaml
 services:
   dashboard:
-    image: mcr.microsoft.com/dotnet/aspire-dashboard:9.4
+    image: mcr.microsoft.com/dotnet/aspire-dashboard:13.1
     ports:
       - "18888:18888"   # Web UI
       - "18889:18889"   # OTLP gRPC receiver
@@ -100,7 +100,7 @@ services:
 Fly.io deployment for the Aspire Dashboard:
 
 - App name: `bulk-fhir-dashboard`
-- Image: `mcr.microsoft.com/dotnet/aspire-dashboard:9.4`
+- Image: `mcr.microsoft.com/dotnet/aspire-dashboard:13.1`
 - Region: `iad`
 - Web UI: exposed on HTTPS via `[http_service]` (internal port 18888)
 - OTLP: port 18889 must NOT appear in any `[[services]]` or `[http_service]` block — it is reachable over Fly's 6PN private network automatically because the container binds to `0.0.0.0:18889`
