@@ -12,6 +12,8 @@
     <Compile Include="GroupTests.fs" />
     <Compile Include="ResourceTests.fs" />
     <Compile Include="BulkExportTests.fs" />
+    <Compile Include="DashboardTests.fs" />
+    <Compile Include="DashboardSchemaTests.fs" />
     <Compile Include="Program.fs" />
   </ItemGroup>
 
@@ -22,6 +24,7 @@
   <ItemGroup>
     <PackageReference Include="Expecto" Version="10.2.3" />
     <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" Version="10.0.5" />
+    <PackageReference Include="Npgsql" Version="10.0.2" />
     <PackageReference Include="Unquote" Version="7.0.1" />
   </ItemGroup>
 
