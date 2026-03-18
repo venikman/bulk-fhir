@@ -25,19 +25,5 @@ services:
       db:
         condition: service_healthy
 
-  import:
-    build: .
-    entrypoint: ["dotnet", "import/BulkFhir.Import.dll"]
-    environment:
-      CONNECTION_STRING: "Host=db;Port=5432;Database=bulk_fhir;Username=postgres;Password=postgres"
-      DATA_DIR: /data/downloads
-    volumes:
-      - ./downloads:/data/downloads:ro
-    depends_on:
-      db:
-        condition: service_healthy
-    profiles:
-      - import
-
 volumes:
   pgdata:
