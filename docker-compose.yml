@@ -1,0 +1,43 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: bulk_fhir
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5433:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 2s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build: .
+    ports:
+      - "8080:8080"
+    environment:
+      ConnectionStrings__DefaultConnection: "Host=db;Port=5432;Database=bulk_fhir;Username=postgres;Password=postgres"
+    depends_on:
+      db:
+        condition: service_healthy
+
+  import:
+    build: .
+    entrypoint: ["dotnet", "import/BulkFhir.Import.dll"]
+    environment:
+      CONNECTION_STRING: "Host=db;Port=5432;Database=bulk_fhir;Username=postgres;Password=postgres"
+      DATA_DIR: /data/downloads
+    volumes:
+      - ./downloads:/data/downloads:ro
+    depends_on:
+      db:
+        condition: service_healthy
+    profiles:
+      - import
+
+volumes:
+  pgdata:

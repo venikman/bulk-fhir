@@ -1,0 +1,21 @@
+bin/
+obj/
+.vs/
+*.user
+*.suo
+appsettings.Development.json
+
+# NDJSON data (not needed in repo)
+downloads/
+patient-1000/
+
+# Build output
+publish/
+
+# IDE
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db

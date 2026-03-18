@@ -1,0 +1,31 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="Fixtures.fs" />
+    <Compile Include="HealthTests.fs" />
+    <Compile Include="MetadataTests.fs" />
+    <Compile Include="GroupTests.fs" />
+    <Compile Include="ResourceTests.fs" />
+    <Compile Include="BulkExportTests.fs" />
+    <Compile Include="Program.fs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\BulkFhir.Api\BulkFhir.Api.fsproj" />
+    <ProjectReference Include="..\..\src\BulkFhir.Domain\BulkFhir.Domain.fsproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Expecto" Version="10.2.3" />
+    <PackageReference Include="FsHttp" Version="15.0.3" />
+    <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" Version="10.0.5" />
+    <PackageReference Include="Testcontainers.PostgreSql" Version="4.11.0" />
+    <PackageReference Include="Unquote" Version="7.0.1" />
+  </ItemGroup>
+
+</Project>

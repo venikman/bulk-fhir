@@ -1,0 +1,11 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/BulkFhir.Api/BulkFhir.Api.fsproj" />
+    <Project Path="src/BulkFhir.Domain/BulkFhir.Domain.fsproj" />
+    <Project Path="src/BulkFhir.Import/BulkFhir.Import.fsproj" />
+    <Project Path="src/BulkFhir.Storage/BulkFhir.Storage.fsproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/BulkFhir.Tests.E2E/BulkFhir.Tests.E2E.fsproj" />
+  </Folder>
+</Solution>

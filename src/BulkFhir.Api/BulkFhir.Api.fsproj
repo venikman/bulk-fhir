@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="Fhir.fs" />
+    <Compile Include="BulkExport.fs" />
+    <Compile Include="Handlers.fs" />
+    <Compile Include="Program.fs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\BulkFhir.Domain\BulkFhir.Domain.fsproj" />
+    <ProjectReference Include="..\BulkFhir.Storage\BulkFhir.Storage.fsproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Falco" Version="5.2.0" />
+  </ItemGroup>
+
+</Project>
