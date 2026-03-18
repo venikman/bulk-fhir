@@ -9,7 +9,6 @@
     <Compile Include="Schema.fs" />
     <Compile Include="Search.fs" />
     <Compile Include="Repository.fs" />
-    <Compile Include="Import.fs" />
   </ItemGroup>
 
   <ItemGroup>

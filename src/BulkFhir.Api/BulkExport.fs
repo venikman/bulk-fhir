@@ -54,6 +54,8 @@ module BulkExport =
         match jobs.TryGetValue(jobId) with
         | true, job ->
             jobs.[job.Id] <- { job with Status = Expired; ExpiresAt = Some DateTime.UtcNow }
+            try if Directory.Exists(job.OutputDir) then Directory.Delete(job.OutputDir, true)
+            with _ -> ()
             true
         | _ -> false
 

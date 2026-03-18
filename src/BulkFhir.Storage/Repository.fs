@@ -1,6 +1,7 @@
 namespace BulkFhir.Storage
 
 open System
+open System.Globalization
 open Npgsql
 open Dapper
 open BulkFhir.Domain
@@ -82,7 +83,6 @@ module Repository =
             if refs.IsEmpty then return []
             else
                 let table = FhirResourceType.tableName resourceType
-                // Determine the reference column name based on the table
                 let refCol =
                     match resourceType with
                     | FhirResourceType.AllergyIntolerance
@@ -90,7 +90,21 @@ module Repository =
                     | FhirResourceType.Claim
                     | FhirResourceType.ExplanationOfBenefit
                     | FhirResourceType.Device -> "patient_ref"
-                    | _ -> "subject_ref"
+                    | FhirResourceType.Encounter
+                    | FhirResourceType.Condition
+                    | FhirResourceType.Observation
+                    | FhirResourceType.Procedure
+                    | FhirResourceType.MedicationRequest
+                    | FhirResourceType.CarePlan
+                    | FhirResourceType.CareTeam
+                    | FhirResourceType.DiagnosticReport
+                    | FhirResourceType.DocumentReference
+                    | FhirResourceType.ImagingStudy -> "subject_ref"
+                    | FhirResourceType.Patient
+                    | FhirResourceType.Practitioner
+                    | FhirResourceType.Organization
+                    | FhirResourceType.Group ->
+                        failwith $"getBySubjectRefs not applicable to {FhirResourceType.toString resourceType}"
 
                 let sql = $"SELECT resource_text FROM {table} WHERE {refCol} = ANY(@Refs)"
                 use conn = new NpgsqlConnection(connString)
@@ -140,7 +154,7 @@ module Repository =
                 Some (Search.OrStringParam (["family_name"; "given_name"], value))
             | FhirResourceType.Patient, "birthdate" ->
                 let prefix, dateStr = Search.parseDatePrefix value
-                match DateTime.TryParse(dateStr) with
+                match DateTime.TryParse(dateStr, CultureInfo.InvariantCulture, DateTimeStyles.None) with
                 | true, dt -> Some (Search.DateParam ("birth_date", prefix, dt))
                 | _ -> None
             | FhirResourceType.Patient, "gender" ->
@@ -152,7 +166,7 @@ module Repository =
                 Some (Search.ReferenceParam ("subject_ref", value))
             | FhirResourceType.Encounter, "date" ->
                 let prefix, dateStr = Search.parseDatePrefix value
-                match DateTime.TryParse(dateStr) with
+                match DateTime.TryParse(dateStr, CultureInfo.InvariantCulture, DateTimeStyles.None) with
                 | true, dt -> Some (Search.DateParam ("period_start", prefix, dt))
                 | _ -> None
             | FhirResourceType.Encounter, "status" ->
@@ -188,7 +202,7 @@ module Repository =
                 Some (Search.ReferenceParam ("category_code", value))
             | FhirResourceType.Observation, "date" ->
                 let prefix, dateStr = Search.parseDatePrefix value
-                match DateTime.TryParse(dateStr) with
+                match DateTime.TryParse(dateStr, CultureInfo.InvariantCulture, DateTimeStyles.None) with
                 | true, dt -> Some (Search.DateParam ("effective_date", prefix, dt))
                 | _ -> None
 
@@ -225,7 +239,7 @@ module Repository =
                 Some (Search.ReferenceParam ("status", value))
             | FhirResourceType.Immunization, "date" ->
                 let prefix, dateStr = Search.parseDatePrefix value
-                match DateTime.TryParse(dateStr) with
+                match DateTime.TryParse(dateStr, CultureInfo.InvariantCulture, DateTimeStyles.None) with
                 | true, dt -> Some (Search.DateParam ("occurrence_date", prefix, dt))
                 | _ -> None
 
@@ -248,7 +262,7 @@ module Repository =
                 Some (Search.ReferenceParam ("status", value))
             | FhirResourceType.Claim, "created" ->
                 let prefix, dateStr = Search.parseDatePrefix value
-                match DateTime.TryParse(dateStr) with
+                match DateTime.TryParse(dateStr, CultureInfo.InvariantCulture, DateTimeStyles.None) with
                 | true, dt -> Some (Search.DateParam ("created", prefix, dt))
                 | _ -> None
 
@@ -259,7 +273,7 @@ module Repository =
                 Some (Search.ReferenceParam ("status", value))
             | FhirResourceType.ExplanationOfBenefit, "created" ->
                 let prefix, dateStr = Search.parseDatePrefix value
-                match DateTime.TryParse(dateStr) with
+                match DateTime.TryParse(dateStr, CultureInfo.InvariantCulture, DateTimeStyles.None) with
                 | true, dt -> Some (Search.DateParam ("created", prefix, dt))
                 | _ -> None
 
@@ -271,7 +285,7 @@ module Repository =
                 Some (Search.TokenParam ("code_system", "code_value", sys, code))
             | FhirResourceType.DiagnosticReport, "date" ->
                 let prefix, dateStr = Search.parseDatePrefix value
-                match DateTime.TryParse(dateStr) with
+                match DateTime.TryParse(dateStr, CultureInfo.InvariantCulture, DateTimeStyles.None) with
                 | true, dt -> Some (Search.DateParam ("effective_date", prefix, dt))
                 | _ -> None
             | FhirResourceType.DiagnosticReport, "status" ->
@@ -284,7 +298,7 @@ module Repository =
                 Some (Search.ReferenceParam ("status", value))
             | FhirResourceType.DocumentReference, "date" ->
                 let prefix, dateStr = Search.parseDatePrefix value
-                match DateTime.TryParse(dateStr) with
+                match DateTime.TryParse(dateStr, CultureInfo.InvariantCulture, DateTimeStyles.None) with
                 | true, dt -> Some (Search.DateParam ("date", prefix, dt))
                 | _ -> None
 
@@ -301,7 +315,7 @@ module Repository =
                 Some (Search.ReferenceParam ("status", value))
             | FhirResourceType.ImagingStudy, "started" ->
                 let prefix, dateStr = Search.parseDatePrefix value
-                match DateTime.TryParse(dateStr) with
+                match DateTime.TryParse(dateStr, CultureInfo.InvariantCulture, DateTimeStyles.None) with
                 | true, dt -> Some (Search.DateParam ("started", prefix, dt))
                 | _ -> None
 

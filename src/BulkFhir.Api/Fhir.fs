@@ -1,5 +1,6 @@
 namespace BulkFhir.Api
 
+open System
 open System.IO
 open System.Text.Json
 open BulkFhir.Domain
@@ -61,7 +62,7 @@ module Fhir =
         JsonSerializer.Serialize(
             {| resourceType = "CapabilityStatement"
                status = "active"
-               date = "2026-03-17"
+               date = DateTime.UtcNow.ToString("yyyy-MM-dd")
                kind = "instance"
                fhirVersion = "4.0.1"
                format = [| "json" |]

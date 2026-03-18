@@ -57,6 +57,16 @@ module Handlers =
                 let baseUrl = getBaseUrl ctx
                 let query = ctx.Request.Query
 
+                let knownKeys = set ["identifier"; "name"]
+                let unknown =
+                    query.Keys
+                    |> Seq.filter (fun k -> not (knownKeys.Contains k))
+                    |> Seq.toList
+                if not unknown.IsEmpty then
+                    let msg = sprintf "Unsupported search parameter(s) for Group: %s" (String.Join(", ", unknown))
+                    return! fhirJson 400 (Fhir.operationOutcome "error" "invalid" msg) ctx
+                else
+
                 let hasIdentifier = query.ContainsKey("identifier")
                 let hasName = query.ContainsKey("name")
 

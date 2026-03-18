@@ -218,18 +218,6 @@ CREATE TABLE IF NOT EXISTS imaging_studies (
 );
 CREATE INDEX IF NOT EXISTS idx_imaging_subject ON imaging_studies (subject_ref);
 
--- Bulk export jobs
-CREATE TABLE IF NOT EXISTS bulk_export_jobs (
-    id              TEXT PRIMARY KEY,
-    group_id        TEXT NOT NULL,
-    status          TEXT NOT NULL DEFAULT 'pending',
-    request_url     TEXT NOT NULL,
-    types           TEXT NOT NULL,
-    created_at      TIMESTAMP NOT NULL DEFAULT NOW(),
-    completed_at    TIMESTAMP,
-    expires_at      TIMESTAMP,
-    progress        TEXT
-);
 """
 
     let createSchema (connString: string) =

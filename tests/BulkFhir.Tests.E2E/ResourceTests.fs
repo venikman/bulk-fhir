@@ -47,21 +47,21 @@ let tests (fixture: TestFixture) =
         }
 
         testTask "GET /fhir/Patient?name=<discovered> returns matching patients" {
-            if discoveredPatientName <> "" then
-                let! (resp: HttpResponseMessage) = fixture.Client.GetAsync($"/fhir/Patient?name={discoveredPatientName}")
-                test <@ resp.StatusCode = HttpStatusCode.OK @>
-                let! body = readBody resp
-                let doc = parseJson body
-                test <@ doc.RootElement.GetProperty("total").GetInt32() >= 1 @>
+            test <@ discoveredPatientName <> "" @>
+            let! (resp: HttpResponseMessage) = fixture.Client.GetAsync($"/fhir/Patient?name={discoveredPatientName}")
+            test <@ resp.StatusCode = HttpStatusCode.OK @>
+            let! body = readBody resp
+            let doc = parseJson body
+            test <@ doc.RootElement.GetProperty("total").GetInt32() >= 1 @>
         }
 
         testTask "GET /fhir/Patient?gender=<discovered> filters by gender" {
-            if discoveredPatientGender <> "" then
-                let! (resp: HttpResponseMessage) = fixture.Client.GetAsync($"/fhir/Patient?gender={discoveredPatientGender}")
-                test <@ resp.StatusCode = HttpStatusCode.OK @>
-                let! body = readBody resp
-                let doc = parseJson body
-                test <@ doc.RootElement.GetProperty("total").GetInt32() >= 1 @>
+            test <@ discoveredPatientGender <> "" @>
+            let! (resp: HttpResponseMessage) = fixture.Client.GetAsync($"/fhir/Patient?gender={discoveredPatientGender}")
+            test <@ resp.StatusCode = HttpStatusCode.OK @>
+            let! body = readBody resp
+            let doc = parseJson body
+            test <@ doc.RootElement.GetProperty("total").GetInt32() >= 1 @>
         }
 
         testTask "GET /fhir/Patient?birthdate=ge1900-01-01 filters by date" {
@@ -88,23 +88,23 @@ let tests (fixture: TestFixture) =
         }
 
         testTask "GET /fhir/Condition?code=system|code returns conditions" {
-            if discoveredConditionSystem <> "" then
-                let! (resp: HttpResponseMessage) =
-                    fixture.Client.GetAsync($"/fhir/Condition?code={discoveredConditionSystem}|{discoveredConditionCode}")
-                test <@ resp.StatusCode = HttpStatusCode.OK @>
-                let! body = readBody resp
-                let doc = parseJson body
-                test <@ doc.RootElement.GetProperty("total").GetInt32() >= 1 @>
+            test <@ discoveredConditionSystem <> "" @>
+            let! (resp: HttpResponseMessage) =
+                fixture.Client.GetAsync($"/fhir/Condition?code={discoveredConditionSystem}|{discoveredConditionCode}")
+            test <@ resp.StatusCode = HttpStatusCode.OK @>
+            let! body = readBody resp
+            let doc = parseJson body
+            test <@ doc.RootElement.GetProperty("total").GetInt32() >= 1 @>
         }
 
         testTask "GET /fhir/Condition?patient=ref returns patient conditions" {
-            if discoveredConditionPatientRef <> "" then
-                let! (resp: HttpResponseMessage) =
-                    fixture.Client.GetAsync($"/fhir/Condition?patient={discoveredConditionPatientRef}")
-                test <@ resp.StatusCode = HttpStatusCode.OK @>
-                let! body = readBody resp
-                let doc = parseJson body
-                test <@ doc.RootElement.GetProperty("total").GetInt32() >= 1 @>
+            test <@ discoveredConditionPatientRef <> "" @>
+            let! (resp: HttpResponseMessage) =
+                fixture.Client.GetAsync($"/fhir/Condition?patient={discoveredConditionPatientRef}")
+            test <@ resp.StatusCode = HttpStatusCode.OK @>
+            let! body = readBody resp
+            let doc = parseJson body
+            test <@ doc.RootElement.GetProperty("total").GetInt32() >= 1 @>
         }
 
         testTask "GET /fhir/UnknownType returns 404" {

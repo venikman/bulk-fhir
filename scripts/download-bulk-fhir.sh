@@ -87,7 +87,7 @@ while IFS=$'\t' read -r RTYPE URL; do
     IDX=${TYPE_COUNTS[$RTYPE]:-0}
     IDX=$((IDX + 1))
     TYPE_COUNTS[$RTYPE]=$IDX
-    FILENAME="${RTYPE}.${IDX}.ndjson"
+    FILENAME="${IDX}.${RTYPE}.ndjson"
   fi
 
   printf "  [%3d/%d] Downloading %s..." "$COUNT" "$TOTAL" "$FILENAME"
