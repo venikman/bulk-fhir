@@ -8,6 +8,11 @@ primary_region = 'iad'
 
 [build]
 
+[env]
+  OTEL_EXPORTER_OTLP_ENDPOINT = "http://fhir-copilot-phoenix.internal:4317"
+  OTEL_EXPORTER_OTLP_PROTOCOL = "grpc"
+  OTEL_SERVICE_NAME = "bulk-fhir"
+
 [http_service]
   internal_port = 8080
   force_https = true
