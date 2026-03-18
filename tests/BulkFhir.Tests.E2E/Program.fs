@@ -3,9 +3,8 @@ open BulkFhir.Tests.Fixtures
 
 [<EntryPoint>]
 let main args =
-    // Start fixture (Testcontainers + TestServer)
     let fixture = TestFixture()
-    fixture.StartAsync() |> Async.AwaitTask |> Async.RunSynchronously
+    printfn $"Mode: {fixture.Mode}"
 
     try
         let allTests =
@@ -19,4 +18,4 @@ let main args =
 
         runTestsWithCLIArgs [] args allTests
     finally
-        fixture.StopAsync() |> Async.AwaitTask |> Async.RunSynchronously
+        fixture.Dispose()

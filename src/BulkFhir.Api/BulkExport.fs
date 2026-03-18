@@ -58,74 +58,68 @@ module BulkExport =
         | _ -> false
 
     /// Run the bulk export: query resources for each type linked to the group, write NDJSON files.
-    let runExport (connString: string) (job: ExportJob) =
+    let runExport (connString: string) (job: ExportJob) (groupJson: string) =
         task {
             try
                 updateJob { job with Status = InProgress "Resolving group members..." }
 
-                // Get the Group resource to find member references
-                let! groupJson = Repository.readById connString FhirResourceType.Group job.GroupId
-                match groupJson with
-                | None ->
-                    updateJob { job with Status = Failed "Group not found" }
-                | Some json ->
-                    let doc = JsonDocument.Parse(json)
-                    let root = doc.RootElement
+                let doc = JsonDocument.Parse(groupJson)
+                let root = doc.RootElement
 
-                    // Extract patient references from Group.member[].entity.reference
-                    let patientRefs =
-                        match root.TryGetProperty("member") with
-                        | true, arr when arr.ValueKind = JsonValueKind.Array ->
-                            [ for i in 0 .. arr.GetArrayLength() - 1 do
-                                let m = arr.[i]
-                                match m.TryGetProperty("entity") with
-                                | true, e ->
-                                    match e.TryGetProperty("reference") with
-                                    | true, r when r.ValueKind = JsonValueKind.String ->
-                                        yield r.GetString()
-                                    | _ -> ()
-                                | _ -> () ]
-                        | _ -> []
+                // Extract patient references from Group.member[].entity.reference
+                let patientRefs =
+                    match root.TryGetProperty("member") with
+                    | true, arr when arr.ValueKind = JsonValueKind.Array ->
+                        [ for i in 0 .. arr.GetArrayLength() - 1 do
+                            let m = arr.[i]
+                            match m.TryGetProperty("entity") with
+                            | true, e ->
+                                match e.TryGetProperty("reference") with
+                                | true, r when r.ValueKind = JsonValueKind.String ->
+                                    yield r.GetString()
+                                | _ -> ()
+                            | _ -> () ]
+                    | _ -> []
 
-                    // Normalize refs: extract the UUID from both "Patient/uuid" and "urn:uuid:uuid"
-                    let patientIds =
-                        patientRefs |> List.map (fun r ->
-                            if r.StartsWith("Patient/") then r.[8..]
-                            elif r.StartsWith("urn:uuid:") then r.[9..]
-                            else r)
+                // Normalize refs: extract the UUID from both "Patient/uuid" and "urn:uuid:uuid"
+                let patientIds =
+                    patientRefs |> List.map (fun r ->
+                        if r.StartsWith("Patient/") then r.[8..]
+                        elif r.StartsWith("urn:uuid:") then r.[9..]
+                        else r)
 
-                    // Build the "Patient/{id}" form for subject_ref lookups
-                    let patientSubjectRefs = patientIds |> List.map (fun id -> $"Patient/{id}")
+                // Build the "Patient/{id}" form for subject_ref lookups
+                let patientSubjectRefs = patientIds |> List.map (fun id -> $"Patient/{id}")
 
-                    updateJob { job with Status = InProgress $"Found {patientRefs.Length} members, exporting..." }
+                updateJob { job with Status = InProgress $"Found {patientRefs.Length} members, exporting..." }
 
-                    // Write Group NDJSON
-                    if job.Types |> List.contains FhirResourceType.Group then
-                        let path = Path.Combine(job.OutputDir, "Group-1.ndjson")
-                        File.WriteAllText(path, json + "\n")
+                // Write Group NDJSON
+                if job.Types |> List.contains FhirResourceType.Group then
+                    let path = Path.Combine(job.OutputDir, "Group-1.ndjson")
+                    File.WriteAllText(path, groupJson + "\n")
 
-                    // For each requested type, query resources and write NDJSON
-                    for rt in job.Types do
-                        if rt <> FhirResourceType.Group then
-                            let typeName = FhirResourceType.toString rt
-                            updateJob { job with Status = InProgress $"Exporting {typeName}..." }
+                // For each requested type, query resources and write NDJSON
+                for rt in job.Types do
+                    if rt <> FhirResourceType.Group then
+                        let typeName = FhirResourceType.toString rt
+                        updateJob { job with Status = InProgress $"Exporting {typeName}..." }
 
-                            let! resources =
-                                match rt with
-                                | FhirResourceType.Patient ->
-                                    Repository.readByIds connString FhirResourceType.Patient patientIds
-                                | FhirResourceType.Organization | FhirResourceType.Practitioner ->
-                                    Repository.listAll connString rt
-                                | _ ->
-                                    Repository.getBySubjectRefs connString rt patientSubjectRefs
+                        let! resources =
+                            match rt with
+                            | FhirResourceType.Patient ->
+                                Repository.readByIds connString FhirResourceType.Patient patientIds
+                            | FhirResourceType.Organization | FhirResourceType.Practitioner ->
+                                Repository.listAll connString rt
+                            | _ ->
+                                Repository.getBySubjectRefs connString rt patientSubjectRefs
 
-                            if not resources.IsEmpty then
-                                let path = Path.Combine(job.OutputDir, $"{typeName}-1.ndjson")
-                                let content = resources |> String.concat "\n"
-                                File.WriteAllText(path, content + "\n")
+                        if not resources.IsEmpty then
+                            let path = Path.Combine(job.OutputDir, $"{typeName}-1.ndjson")
+                            let content = resources |> String.concat "\n"
+                            File.WriteAllText(path, content + "\n")
 
-                    let now = DateTime.UtcNow
-                    updateJob { job with Status = Completed; CompletedAt = Some now; ExpiresAt = Some (now.AddHours(1.0)) }
+                let now = DateTime.UtcNow
+                updateJob { job with Status = Completed; CompletedAt = Some now; ExpiresAt = Some (now.AddHours(1.0)) }
             with ex ->
                 updateJob { job with Status = Failed ex.Message }
         }

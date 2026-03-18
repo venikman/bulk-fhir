@@ -96,11 +96,7 @@ module Handlers =
     // ─── Bulk Export ────────────────────────────────
 
     let private validExportTypes =
-        set [ "Group"; "Patient"; "Coverage"; "RelatedPerson"; "Practitioner"
-              "PractitionerRole"; "Organization"; "Location"; "Encounter"
-              "Condition"; "Procedure"; "Observation"; "MedicationRequest"; "AllergyIntolerance"
-              "Immunization"; "CarePlan"; "CareTeam"; "Claim"; "ExplanationOfBenefit"
-              "DiagnosticReport"; "DocumentReference"; "Device"; "ImagingStudy" ]
+        FhirResourceType.all |> List.map FhirResourceType.toString |> Set.ofList
 
     let bulkExportKickoff : HttpHandler =
         fun ctx ->
@@ -142,7 +138,7 @@ module Handlers =
                 match group with
                 | None ->
                     return! fhirJson 404 (Fhir.operationOutcome "error" "not-found" "Group not found.") ctx
-                | Some _ ->
+                | Some groupJson ->
 
                 let fhirTypes =
                     requestedTypes
@@ -151,8 +147,8 @@ module Handlers =
                 let requestUrl = $"{baseUrl}{ctx.Request.Path}{ctx.Request.QueryString}"
                 let job = BulkExport.createJob groupId requestUrl fhirTypes
 
-                // Fire and forget the export
-                let _ = Task.Run(fun () -> BulkExport.runExport connString job :> Task)
+                // Fire and forget the export (pass pre-fetched group JSON to avoid re-read)
+                let _ = Task.Run(fun () -> BulkExport.runExport connString job groupJson :> Task)
 
                 ctx.Response.StatusCode <- 202
                 ctx.Response.Headers.["Content-Location"] <- $"{baseUrl}/fhir/bulk-status/{job.Id}"
@@ -222,8 +218,8 @@ module Handlers =
                     let filePath = Path.Combine(job.OutputDir, sanitized)
                     if File.Exists(filePath) then
                         ctx.Response.ContentType <- Fhir.ndjsonContentType
-                        let! content = File.ReadAllTextAsync(filePath)
-                        return! ctx.Response.WriteAsync(content)
+                        use fileStream = File.OpenRead(filePath)
+                        do! fileStream.CopyToAsync(ctx.Response.Body)
                     else
                         return! fhirJson 404 (Fhir.operationOutcome "error" "not-found" $"File '{fileName}' not found.") ctx
             } :> Task
@@ -245,6 +241,18 @@ module Handlers =
                         ctx.Request.Query
                         |> Seq.collect (fun kv -> kv.Value |> Seq.map (fun v -> kv.Key, v))
                         |> Seq.toList
+
+                    let known = Repository.knownSearchParams rt
+                    let unknown =
+                        queryParams
+                        |> List.map fst
+                        |> List.filter (fun k -> not (known.Contains k))
+                        |> List.distinct
+
+                    if not unknown.IsEmpty then
+                        let msg = sprintf "Unsupported search parameter(s) for %s: %s" typeName (String.Join(", ", unknown))
+                        return! fhirJson 400 (Fhir.operationOutcome "error" "invalid" msg) ctx
+                    else
 
                     let searchParams = Repository.parseSearchParams rt queryParams
                     let! results = Repository.search connString rt searchParams

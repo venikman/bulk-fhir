@@ -2,13 +2,9 @@ module BulkFhir.Tests.MetadataTests
 
 open System.Net
 open System.Net.Http
-open System.Text.Json
 open Expecto
 open Swensen.Unquote
 open BulkFhir.Tests.Fixtures
-
-let private readBody (resp: HttpResponseMessage) = resp.Content.ReadAsStringAsync()
-let private parseJson (s: string) = JsonDocument.Parse(s)
 
 let tests (fixture: TestFixture) =
     testList "Metadata" [

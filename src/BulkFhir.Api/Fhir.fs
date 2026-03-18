@@ -2,6 +2,7 @@ namespace BulkFhir.Api
 
 open System.IO
 open System.Text.Json
+open BulkFhir.Domain
 
 /// FHIR response helpers: Bundle, OperationOutcome, CapabilityStatement.
 module Fhir =
@@ -49,11 +50,7 @@ module Fhir =
 
     let capabilityStatement (baseUrl: string) =
         let resourceTypes =
-            [| "Patient"; "Practitioner"; "Organization"; "Group"; "Encounter"
-               "Condition"; "Observation"; "Procedure"; "MedicationRequest"
-               "AllergyIntolerance"; "Immunization"; "CarePlan"; "CareTeam"
-               "Claim"; "ExplanationOfBenefit"; "DiagnosticReport"
-               "DocumentReference"; "Device"; "ImagingStudy" |]
+            FhirResourceType.all |> List.map FhirResourceType.toString |> Array.ofList
 
         let restResources =
             resourceTypes

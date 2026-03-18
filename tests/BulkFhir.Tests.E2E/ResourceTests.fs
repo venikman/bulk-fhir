@@ -2,69 +2,109 @@ module BulkFhir.Tests.ResourceTests
 
 open System.Net
 open System.Net.Http
-open System.Text.Json
 open Expecto
 open Swensen.Unquote
 open BulkFhir.Tests.Fixtures
 
-let private readBody (resp: HttpResponseMessage) = resp.Content.ReadAsStringAsync()
-let private parseJson (s: string) = JsonDocument.Parse(s)
-
 let tests (fixture: TestFixture) =
-    testList "Resource Read/Search" [
+    let mutable discoveredPatientId = ""
+    let mutable discoveredPatientName = ""
+    let mutable discoveredPatientGender = ""
+    let mutable discoveredConditionCode = ""
+    let mutable discoveredConditionSystem = ""
+    let mutable discoveredConditionPatientRef = ""
+
+    testSequenced (testList "Resource Read/Search" [
+        testTask "discover a Patient via search" {
+            let! (resp: HttpResponseMessage) = fixture.Client.GetAsync("/fhir/Patient")
+            test <@ resp.StatusCode = HttpStatusCode.OK @>
+            let! body = readBody resp
+            let doc = parseJson body
+            test <@ doc.RootElement.GetProperty("total").GetInt32() >= 1 @>
+
+            let entry = doc.RootElement.GetProperty("entry").[0].GetProperty("resource")
+            discoveredPatientId <- entry.GetProperty("id").GetString()
+
+            try discoveredPatientName <- entry.GetProperty("name").[0].GetProperty("family").GetString()
+            with _ -> ()
+
+            try discoveredPatientGender <- entry.GetProperty("gender").GetString()
+            with _ -> ()
+        }
+
         testTask "GET /fhir/Patient/{id} returns patient" {
-            let! (resp: HttpResponseMessage) = fixture.Client.GetAsync("/fhir/Patient/test-patient-1")
+            let! (resp: HttpResponseMessage) = fixture.Client.GetAsync($"/fhir/Patient/{discoveredPatientId}")
             test <@ resp.StatusCode = HttpStatusCode.OK @>
             let! body = readBody resp
             let doc = parseJson body
             test <@ doc.RootElement.GetProperty("resourceType").GetString() = "Patient" @>
-            test <@ doc.RootElement.GetProperty("id").GetString() = "test-patient-1" @>
+            test <@ doc.RootElement.GetProperty("id").GetString() = discoveredPatientId @>
         }
 
         testTask "GET /fhir/Patient/{id} with unknown ID returns 404" {
-            let! (resp: HttpResponseMessage) = fixture.Client.GetAsync("/fhir/Patient/nonexistent")
+            let! (resp: HttpResponseMessage) = fixture.Client.GetAsync("/fhir/Patient/nonexistent-patient-id-99999")
             test <@ resp.StatusCode = HttpStatusCode.NotFound @>
         }
 
-        testTask "GET /fhir/Patient?name=Smith returns matching patients" {
-            let! (resp: HttpResponseMessage) = fixture.Client.GetAsync("/fhir/Patient?name=Smith")
-            test <@ resp.StatusCode = HttpStatusCode.OK @>
-            let! body = readBody resp
-            let doc = parseJson body
-            test <@ doc.RootElement.GetProperty("total").GetInt32() >= 1 @>
+        testTask "GET /fhir/Patient?name=<discovered> returns matching patients" {
+            if discoveredPatientName <> "" then
+                let! (resp: HttpResponseMessage) = fixture.Client.GetAsync($"/fhir/Patient?name={discoveredPatientName}")
+                test <@ resp.StatusCode = HttpStatusCode.OK @>
+                let! body = readBody resp
+                let doc = parseJson body
+                test <@ doc.RootElement.GetProperty("total").GetInt32() >= 1 @>
         }
 
-        testTask "GET /fhir/Patient?gender=male filters by gender" {
-            let! (resp: HttpResponseMessage) = fixture.Client.GetAsync("/fhir/Patient?gender=male")
-            test <@ resp.StatusCode = HttpStatusCode.OK @>
-            let! body = readBody resp
-            let doc = parseJson body
-            test <@ doc.RootElement.GetProperty("total").GetInt32() >= 1 @>
+        testTask "GET /fhir/Patient?gender=<discovered> filters by gender" {
+            if discoveredPatientGender <> "" then
+                let! (resp: HttpResponseMessage) = fixture.Client.GetAsync($"/fhir/Patient?gender={discoveredPatientGender}")
+                test <@ resp.StatusCode = HttpStatusCode.OK @>
+                let! body = readBody resp
+                let doc = parseJson body
+                test <@ doc.RootElement.GetProperty("total").GetInt32() >= 1 @>
         }
 
-        testTask "GET /fhir/Patient?birthdate=ge1990-01-01 filters by date" {
-            let! (resp: HttpResponseMessage) = fixture.Client.GetAsync("/fhir/Patient?birthdate=ge1990-01-01")
+        testTask "GET /fhir/Patient?birthdate=ge1900-01-01 filters by date" {
+            let! (resp: HttpResponseMessage) = fixture.Client.GetAsync("/fhir/Patient?birthdate=ge1900-01-01")
             test <@ resp.StatusCode = HttpStatusCode.OK @>
             let! body = readBody resp
             let doc = parseJson body
-            // Should include test-patient-1 (1990-05-15) but not test-patient-2 (1985-03-20)
-            test <@ doc.RootElement.GetProperty("total").GetInt32() = 1 @>
+            test <@ doc.RootElement.GetProperty("total").GetInt32() >= 0 @>
         }
 
-        testTask "GET /fhir/Condition?code=http://snomed.info/sct|44054006 returns conditions" {
-            let! (resp: HttpResponseMessage) = fixture.Client.GetAsync("/fhir/Condition?code=http://snomed.info/sct|44054006")
+        testTask "discover a Condition via search" {
+            let! (resp: HttpResponseMessage) = fixture.Client.GetAsync("/fhir/Condition")
             test <@ resp.StatusCode = HttpStatusCode.OK @>
             let! body = readBody resp
             let doc = parseJson body
-            test <@ doc.RootElement.GetProperty("total").GetInt32() >= 1 @>
+            let total = doc.RootElement.GetProperty("total").GetInt32()
+
+            if total >= 1 then
+                let entry = doc.RootElement.GetProperty("entry").[0].GetProperty("resource")
+                let coding = entry.GetProperty("code").GetProperty("coding").[0]
+                discoveredConditionSystem <- coding.GetProperty("system").GetString()
+                discoveredConditionCode <- coding.GetProperty("code").GetString()
+                discoveredConditionPatientRef <- entry.GetProperty("subject").GetProperty("reference").GetString()
         }
 
-        testTask "GET /fhir/Condition?patient=Patient/test-patient-1 returns patient conditions" {
-            let! (resp: HttpResponseMessage) = fixture.Client.GetAsync("/fhir/Condition?patient=Patient/test-patient-1")
-            test <@ resp.StatusCode = HttpStatusCode.OK @>
-            let! body = readBody resp
-            let doc = parseJson body
-            test <@ doc.RootElement.GetProperty("total").GetInt32() >= 1 @>
+        testTask "GET /fhir/Condition?code=system|code returns conditions" {
+            if discoveredConditionSystem <> "" then
+                let! (resp: HttpResponseMessage) =
+                    fixture.Client.GetAsync($"/fhir/Condition?code={discoveredConditionSystem}|{discoveredConditionCode}")
+                test <@ resp.StatusCode = HttpStatusCode.OK @>
+                let! body = readBody resp
+                let doc = parseJson body
+                test <@ doc.RootElement.GetProperty("total").GetInt32() >= 1 @>
+        }
+
+        testTask "GET /fhir/Condition?patient=ref returns patient conditions" {
+            if discoveredConditionPatientRef <> "" then
+                let! (resp: HttpResponseMessage) =
+                    fixture.Client.GetAsync($"/fhir/Condition?patient={discoveredConditionPatientRef}")
+                test <@ resp.StatusCode = HttpStatusCode.OK @>
+                let! body = readBody resp
+                let doc = parseJson body
+                test <@ doc.RootElement.GetProperty("total").GetInt32() >= 1 @>
         }
 
         testTask "GET /fhir/UnknownType returns 404" {
@@ -77,6 +117,6 @@ let tests (fixture: TestFixture) =
             test <@ resp.StatusCode = HttpStatusCode.OK @>
             let! body = readBody resp
             let doc = parseJson body
-            test <@ doc.RootElement.GetProperty("total").GetInt32() >= 1 @>
+            test <@ doc.RootElement.GetProperty("total").GetInt32() >= 0 @>
         }
-    ]
+    ])

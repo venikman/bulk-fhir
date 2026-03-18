@@ -42,6 +42,19 @@ module Import =
         | true, v -> tryGetString v "reference"
         | _ -> None
 
+    let private tryGetHumanName (elem: JsonElement) =
+        match elem.TryGetProperty("name") with
+        | true, arr when arr.ValueKind = JsonValueKind.Array && arr.GetArrayLength() > 0 ->
+            let first = arr.[0]
+            let family = tryGetString first "family"
+            let given =
+                match first.TryGetProperty("given") with
+                | true, g when g.ValueKind = JsonValueKind.Array && g.GetArrayLength() > 0 ->
+                    Some (g.[0].GetString())
+                | _ -> None
+            family, given
+        | _ -> None, None
+
     let private tryParseTimestamp (s: string option) =
         match s with
         | Some v ->
@@ -63,19 +76,7 @@ module Import =
 
             match resourceType with
             | "Patient" ->
-                let familyName =
-                    match root.TryGetProperty("name") with
-                    | true, arr when arr.ValueKind = JsonValueKind.Array && arr.GetArrayLength() > 0 ->
-                        tryGetString arr.[0] "family"
-                    | _ -> None
-                let givenName =
-                    match root.TryGetProperty("name") with
-                    | true, arr when arr.ValueKind = JsonValueKind.Array && arr.GetArrayLength() > 0 ->
-                        match arr.[0].TryGetProperty("given") with
-                        | true, g when g.ValueKind = JsonValueKind.Array && g.GetArrayLength() > 0 ->
-                            Some (g.[0].GetString())
-                        | _ -> None
-                    | _ -> None
+                let familyName, givenName = tryGetHumanName root
                 let sql = "INSERT INTO patients (id, family_name, given_name, birth_date, gender, resource_text) VALUES (@id, @fn, @gn, @bd, @g, @rt) ON CONFLICT (id) DO NOTHING"
                 use cmd = new NpgsqlCommand(sql, conn)
                 cmd.Parameters.AddWithValue("id", id) |> ignore
@@ -94,14 +95,10 @@ module Import =
                     | true, arr when arr.ValueKind = JsonValueKind.Array && arr.GetArrayLength() > 0 ->
                         tryGetNestedRef arr.[0] "individual"
                     | _ -> None
-                let periodStart =
+                let periodStart, periodEnd =
                     match root.TryGetProperty("period") with
-                    | true, p -> tryGetString p "start"
-                    | _ -> None
-                let periodEnd =
-                    match root.TryGetProperty("period") with
-                    | true, p -> tryGetString p "end"
-                    | _ -> None
+                    | true, p -> tryGetString p "start", tryGetString p "end"
+                    | _ -> None, None
                 let typeSys, typeCode = tryGetFirstCoding root "type"
                 let reasonSys, reasonCode = tryGetFirstCoding root "reasonCode"
                 let sql = "INSERT INTO encounters (id, subject_ref, status, period_start, period_end, type_system, type_code, practitioner_ref, reason_system, reason_code, resource_text) VALUES (@id, @sr, @st, @ps, @pe, @ts, @tc, @pr, @rs, @rc, @rt) ON CONFLICT (id) DO NOTHING"
@@ -227,19 +224,7 @@ module Import =
                 ()
 
             | "Practitioner" ->
-                let familyName =
-                    match root.TryGetProperty("name") with
-                    | true, arr when arr.ValueKind = JsonValueKind.Array && arr.GetArrayLength() > 0 ->
-                        tryGetString arr.[0] "family"
-                    | _ -> None
-                let givenName =
-                    match root.TryGetProperty("name") with
-                    | true, arr when arr.ValueKind = JsonValueKind.Array && arr.GetArrayLength() > 0 ->
-                        match arr.[0].TryGetProperty("given") with
-                        | true, g when g.ValueKind = JsonValueKind.Array && g.GetArrayLength() > 0 ->
-                            Some (g.[0].GetString())
-                        | _ -> None
-                    | _ -> None
+                let familyName, givenName = tryGetHumanName root
                 let sql = "INSERT INTO practitioners (id, family_name, given_name, resource_text) VALUES (@id, @fn, @gn, @rt) ON CONFLICT (id) DO NOTHING"
                 use cmd = new NpgsqlCommand(sql, conn)
                 cmd.Parameters.AddWithValue("id", id) |> ignore
@@ -352,11 +337,13 @@ module Import =
                 printfn $"Importing {fileName} ({resourceType})..."
                 use conn = new NpgsqlConnection(connString)
                 do! conn.OpenAsync()
+                use! tx = conn.BeginTransactionAsync()
                 let mutable count = 0
                 for line in File.ReadLines(filePath) do
                     if not (String.IsNullOrWhiteSpace(line)) then
                         do! importLine conn resourceType line
                         count <- count + 1
+                do! tx.CommitAsync()
                 printfn $"  Imported {count} {resourceType} resources"
         }
 

@@ -19,3 +19,7 @@ publish/
 # OS
 .DS_Store
 Thumbs.db
+
+# AI tooling
+.agents/
+.claude/

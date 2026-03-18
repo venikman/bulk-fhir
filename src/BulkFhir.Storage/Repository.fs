@@ -47,9 +47,15 @@ module Repository =
             return results |> Seq.toList
         }
 
-    /// List all resources of a type (no filter).
+    /// List all resources of a type (no filter, no limit). Used by bulk export.
     let listAll (connString: string) (resourceType: FhirResourceType) =
-        search connString resourceType []
+        task {
+            let table = FhirResourceType.tableName resourceType
+            let sql = $"SELECT resource_text FROM {table}"
+            use conn = new NpgsqlConnection(connString)
+            let! results = conn.QueryAsync<string>(sql)
+            return results |> Seq.toList
+        }
 
     /// Search groups by identifier (system|value).
     let searchGroupsByIdentifier (connString: string) (system: string) (value: string) =
@@ -91,6 +97,33 @@ module Repository =
                 let! results = conn.QueryAsync<string>(sql, {| Refs = refs |> Array.ofList |})
                 return results |> Seq.toList
         }
+
+    /// Known search parameters per resource type (including meta-params).
+    /// Used by the handler to reject unsupported parameters.
+    let knownSearchParams (resourceType: FhirResourceType) : Set<string> =
+        let metaParams = set ["_summary"; "_count"; "_format"]
+        let typeParams =
+            match resourceType with
+            | FhirResourceType.Patient              -> set ["name"; "birthdate"; "gender"; "general-practitioner"]
+            | FhirResourceType.Encounter            -> set ["patient"; "date"; "status"; "type"; "practitioner"; "reason-code"]
+            | FhirResourceType.Condition            -> set ["patient"; "code"; "clinical-status"; "category"]
+            | FhirResourceType.Observation          -> set ["patient"; "code"; "category"; "date"]
+            | FhirResourceType.Procedure            -> set ["patient"; "code"]
+            | FhirResourceType.MedicationRequest    -> set ["patient"; "code"; "status"]
+            | FhirResourceType.AllergyIntolerance   -> set ["patient"; "code"; "clinical-status"]
+            | FhirResourceType.Immunization         -> set ["patient"; "status"; "date"]
+            | FhirResourceType.CarePlan             -> set ["patient"; "status"]
+            | FhirResourceType.CareTeam             -> set ["patient"; "status"]
+            | FhirResourceType.Claim                -> set ["patient"; "status"; "created"]
+            | FhirResourceType.ExplanationOfBenefit -> set ["patient"; "status"; "created"]
+            | FhirResourceType.DiagnosticReport     -> set ["patient"; "code"; "date"; "status"]
+            | FhirResourceType.DocumentReference    -> set ["patient"; "status"; "date"]
+            | FhirResourceType.Device               -> set ["patient"; "status"]
+            | FhirResourceType.ImagingStudy         -> set ["patient"; "status"; "started"]
+            | FhirResourceType.Organization         -> set ["name"]
+            | FhirResourceType.Practitioner         -> set ["name"]
+            | FhirResourceType.Group                -> set []
+        Set.union metaParams typeParams
 
     /// Parse FHIR search query params into SearchParam list per resource type.
     let parseSearchParams (resourceType: FhirResourceType) (queryParams: (string * string) list) : Search.SearchParam list =
@@ -178,6 +211,107 @@ module Repository =
             // AllergyIntolerance
             | FhirResourceType.AllergyIntolerance, "patient" ->
                 Some (Search.ReferenceParam ("patient_ref", value))
+            | FhirResourceType.AllergyIntolerance, "code" ->
+                let sys, code = Search.parseToken value
+                Some (Search.TokenParam ("code_system", "code_value", sys, code))
+            | FhirResourceType.AllergyIntolerance, "clinical-status" ->
+                let _, code = Search.parseToken value
+                Some (Search.ReferenceParam ("clinical_status", code))
+
+            // Immunization
+            | FhirResourceType.Immunization, "patient" ->
+                Some (Search.ReferenceParam ("patient_ref", value))
+            | FhirResourceType.Immunization, "status" ->
+                Some (Search.ReferenceParam ("status", value))
+            | FhirResourceType.Immunization, "date" ->
+                let prefix, dateStr = Search.parseDatePrefix value
+                match DateTime.TryParse(dateStr) with
+                | true, dt -> Some (Search.DateParam ("occurrence_date", prefix, dt))
+                | _ -> None
+
+            // CarePlan
+            | FhirResourceType.CarePlan, "patient" ->
+                Some (Search.ReferenceParam ("subject_ref", value))
+            | FhirResourceType.CarePlan, "status" ->
+                Some (Search.ReferenceParam ("status", value))
+
+            // CareTeam
+            | FhirResourceType.CareTeam, "patient" ->
+                Some (Search.ReferenceParam ("subject_ref", value))
+            | FhirResourceType.CareTeam, "status" ->
+                Some (Search.ReferenceParam ("status", value))
+
+            // Claim
+            | FhirResourceType.Claim, "patient" ->
+                Some (Search.ReferenceParam ("patient_ref", value))
+            | FhirResourceType.Claim, "status" ->
+                Some (Search.ReferenceParam ("status", value))
+            | FhirResourceType.Claim, "created" ->
+                let prefix, dateStr = Search.parseDatePrefix value
+                match DateTime.TryParse(dateStr) with
+                | true, dt -> Some (Search.DateParam ("created", prefix, dt))
+                | _ -> None
+
+            // ExplanationOfBenefit
+            | FhirResourceType.ExplanationOfBenefit, "patient" ->
+                Some (Search.ReferenceParam ("patient_ref", value))
+            | FhirResourceType.ExplanationOfBenefit, "status" ->
+                Some (Search.ReferenceParam ("status", value))
+            | FhirResourceType.ExplanationOfBenefit, "created" ->
+                let prefix, dateStr = Search.parseDatePrefix value
+                match DateTime.TryParse(dateStr) with
+                | true, dt -> Some (Search.DateParam ("created", prefix, dt))
+                | _ -> None
+
+            // DiagnosticReport
+            | FhirResourceType.DiagnosticReport, "patient" ->
+                Some (Search.ReferenceParam ("subject_ref", value))
+            | FhirResourceType.DiagnosticReport, "code" ->
+                let sys, code = Search.parseToken value
+                Some (Search.TokenParam ("code_system", "code_value", sys, code))
+            | FhirResourceType.DiagnosticReport, "date" ->
+                let prefix, dateStr = Search.parseDatePrefix value
+                match DateTime.TryParse(dateStr) with
+                | true, dt -> Some (Search.DateParam ("effective_date", prefix, dt))
+                | _ -> None
+            | FhirResourceType.DiagnosticReport, "status" ->
+                Some (Search.ReferenceParam ("status", value))
+
+            // DocumentReference
+            | FhirResourceType.DocumentReference, "patient" ->
+                Some (Search.ReferenceParam ("subject_ref", value))
+            | FhirResourceType.DocumentReference, "status" ->
+                Some (Search.ReferenceParam ("status", value))
+            | FhirResourceType.DocumentReference, "date" ->
+                let prefix, dateStr = Search.parseDatePrefix value
+                match DateTime.TryParse(dateStr) with
+                | true, dt -> Some (Search.DateParam ("date", prefix, dt))
+                | _ -> None
+
+            // Device
+            | FhirResourceType.Device, "patient" ->
+                Some (Search.ReferenceParam ("patient_ref", value))
+            | FhirResourceType.Device, "status" ->
+                Some (Search.ReferenceParam ("status", value))
+
+            // ImagingStudy
+            | FhirResourceType.ImagingStudy, "patient" ->
+                Some (Search.ReferenceParam ("subject_ref", value))
+            | FhirResourceType.ImagingStudy, "status" ->
+                Some (Search.ReferenceParam ("status", value))
+            | FhirResourceType.ImagingStudy, "started" ->
+                let prefix, dateStr = Search.parseDatePrefix value
+                match DateTime.TryParse(dateStr) with
+                | true, dt -> Some (Search.DateParam ("started", prefix, dt))
+                | _ -> None
+
+            // Organization
+            | FhirResourceType.Organization, "name" ->
+                Some (Search.StringParam ("name", value))
+
+            // Practitioner
+            | FhirResourceType.Practitioner, "name" ->
+                Some (Search.OrStringParam (["family_name"; "given_name"], value))
 
             | _ -> None
         )
