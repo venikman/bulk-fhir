@@ -7,8 +7,7 @@
 
   <ItemGroup>
     <Compile Include="Common.fs" />
-    <Compile Include="Resources.fs" />
-    <Compile Include="ResourceType.fs" />
+<Compile Include="ResourceType.fs" />
   </ItemGroup>
 
 </Project>
