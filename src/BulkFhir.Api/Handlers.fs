@@ -163,7 +163,7 @@ module Handlers =
                     |> List.choose FhirResourceType.fromString
 
                 let requestUrl = $"{baseUrl}{ctx.Request.Path}{ctx.Request.QueryString}"
-                let! job = BulkExport.createJob connString groupId requestUrl fhirTypes
+                let job = BulkExport.createJob groupId requestUrl fhirTypes
 
                 logger.LogInformation("Bulk export started job={JobId} group={GroupId} types={Types}", job.Id, groupId, String.Join(",", requestedTypes))
                 let _ = Task.Run(fun () -> BulkExport.runExport connString job groupJson :> Task)
@@ -212,7 +212,7 @@ module Handlers =
             task {
                 let connString = getConnString ctx
                 let jobId = ctx.Request.RouteValues.["jobId"] :?> string
-                let! expired = BulkExport.expireJob connString jobId
+                let expired = BulkExport.expireJob jobId
                 if expired then
                     ctx.Response.StatusCode <- 202
                     return ()

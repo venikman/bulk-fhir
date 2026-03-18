@@ -96,58 +96,6 @@ module Repository =
             return results |> Seq.toList
         }
 
-    /// Persist the dashboard-visible state for a bulk export job.
-    let upsertBulkExportJob
-        (connString: string)
-        (jobId: string)
-        (groupId: string)
-        (status: string)
-        (requestUrl: string)
-        (types: string)
-        (createdAt: DateTime)
-        (completedAt: DateTime option)
-        (expiresAt: DateTime option)
-        (progress: string option) =
-        task {
-            let sql =
-                """
-                INSERT INTO bulk_export_jobs (
-                    id, group_id, status, request_url, types, created_at, completed_at, expires_at, progress
-                )
-                VALUES (
-                    @Id, @GroupId, @Status, @RequestUrl, @Types, @CreatedAt, @CompletedAt, @ExpiresAt, @Progress
-                )
-                ON CONFLICT (id) DO UPDATE SET
-                    group_id = EXCLUDED.group_id,
-                    status = EXCLUDED.status,
-                    request_url = EXCLUDED.request_url,
-                    types = EXCLUDED.types,
-                    created_at = EXCLUDED.created_at,
-                    completed_at = EXCLUDED.completed_at,
-                    expires_at = EXCLUDED.expires_at,
-                    progress = EXCLUDED.progress
-                """
-
-            use conn = Connection.createConnection connString
-            let completedAtValue = completedAt |> Option.toNullable
-            let expiresAtValue = expiresAt |> Option.toNullable
-            let progressValue = progress |> Option.toObj
-            let! _ =
-                conn.ExecuteAsync(
-                    sql,
-                    {| Id = jobId
-                       GroupId = groupId
-                       Status = status
-                       RequestUrl = requestUrl
-                       Types = types
-                       CreatedAt = createdAt
-                       CompletedAt = completedAtValue
-                       ExpiresAt = expiresAtValue
-                       Progress = progressValue |})
-
-            return ()
-        }
-
     /// Get all resource_text for a given type and list of subject/patient references.
     /// Used by bulk export to resolve references from a Group.
     let getBySubjectRefs (connString: string) (resourceType: FhirResourceType) (refs: string list) =
