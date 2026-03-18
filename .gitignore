@@ -20,6 +20,9 @@ publish/
 .DS_Store
 Thumbs.db
 
+# Secrets
+.env
+
 # AI tooling
 .agents/
 .claude/
